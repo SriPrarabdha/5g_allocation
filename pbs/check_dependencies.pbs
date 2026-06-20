@@ -1,0 +1,58 @@
+#!/bin/bash
+#PBS -N 5gnr_check_deps
+#PBS -l select=1:ncpus=4:mem=8gb
+#PBS -l walltime=00:10:00
+#PBS -q workq
+#PBS -o logs/check_deps.out
+#PBS -e logs/check_deps.err
+
+# Submit with:  qsub pbs/check_dependencies.pbs
+# Watch with:   qstat -u $USER     (or: bash scripts/qstat_monitor.sh <jobid>)
+# Read result:  logs/check_deps.out
+#
+# Verifies the full toolchain is present on a COMPUTE node (not just the
+# login node) -- modules, Python deps, the compiled SCIP/ParaSCIP binaries,
+# and the MPI launcher.
+
+cd $PBS_O_WORKDIR
+module load PrgEnv-gnu/8.6.0
+module load cray-mpich/8.1.32
+module load anaconda/3.13.5
+conda activate milp_env
+
+export PYTHONPATH=$PWD/src:$PYTHONPATH
+
+echo "================ ENVIRONMENT ================"
+echo "Host: $(hostname)"
+echo "Date: $(date)"
+python --version
+
+echo "================ PYTHON DEPS ================"
+python - <<'PY'
+import importlib
+mods = ["numpy", "networkx", "yaml", "matplotlib", "highspy"]
+for m in mods:
+    try:
+        mod = importlib.import_module(m)
+        print(f"  OK   {m:12s} {getattr(mod, '__version__', '(no __version__)')}")
+    except Exception as e:
+        print(f"  FAIL {m:12s} {e}")
+PY
+
+echo "================ PACKAGE IMPORT ================"
+python -c "import nr_slice_milp; from nr_slice_milp.model import build_model; print('  OK   nr_slice_milp importable')" \
+    || echo "  FAIL nr_slice_milp import"
+
+echo "================ SOLVER BINARIES ================"
+( $HOME/scip_install/bin/scip  --version 2>&1 | head -1 && echo "  OK   scip" )   || echo "  FAIL scip not found at \$HOME/scip_install/bin/scip"
+( $HOME/scip_install/bin/fscip --version 2>&1 | head -1 && echo "  OK   fscip" )  || echo "  FAIL fscip not found at \$HOME/scip_install/bin/fscip"
+
+echo "================ MPI LAUNCHER ================"
+( command -v mpiexec && mpiexec --version 2>&1 | head -1 && echo "  OK   mpiexec" ) || echo "  FAIL mpiexec not found"
+
+echo "================ CLUSTER LAYOUT ================"
+python -m nr_slice_milp.cluster_config --field total_cpus_used --cluster-config configs/cluster_2node_default.yaml \
+    && echo "  OK   ParascipLayout validates" \
+    || echo "  FAIL ParascipLayout invalid (CPU overshoot?)"
+
+echo "================ DONE ================"

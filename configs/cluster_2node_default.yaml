@@ -1,0 +1,8 @@
+n_nodes: 2
+usable_cpus_per_node: 125
+ranks_per_node: 4
+threads_per_rank: 31
+reserve_cpus_per_node: 1
+gap: 0.01
+time_limit_s: 14400
+node_limit: 1000000

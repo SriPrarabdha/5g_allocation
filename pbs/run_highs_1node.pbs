@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -N 5gnr_highs_1node
+#PBS -l select=1:ncpus=125:mem=120gb
+#PBS -l walltime=04:00:00
+#PBS -q workq
+#PBS -o logs/highs_1node.out
+#PBS -e logs/highs_1node.err
+
+cd $PBS_O_WORKDIR
+module load anaconda/3.13.5
+conda activate milp_env
+
+# Make the package importable even without `pip install -e .`
+export PYTHONPATH=$PWD/src:$PYTHONPATH
+
+# 128 physical CPUs/node, 125 usable (3 reserved for OS/overhead) -- see
+# configs/cluster_2node_default.yaml and README "CPU Layout" section.
+export HIGHS_THREADS=125
+
+PROBLEM_CFG=${PROBLEM_CFG:-configs/problem_target.yaml}
+
+python -m nr_slice_milp.solve_highs --config "$PROBLEM_CFG" --results-out logs/results_1node.json

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nr-slice-milp"
+version = "0.1.0"
+description = "5G NR network slice admission + RB allocation MILP solver and evaluation toolkit"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "networkx",
+    "matplotlib",
+    "pyyaml",
+    "highspy",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

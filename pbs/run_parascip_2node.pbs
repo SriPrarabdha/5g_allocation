@@ -1,0 +1,51 @@
+#!/bin/bash
+#PBS -N 5gnr_parascip_2node
+# NOTE: mpiprocs/ompthreads below MUST match configs/cluster_2node_default.yaml
+# (ranks_per_node=4, threads_per_rank=31). If you change the cluster config,
+# update this select line too.
+#PBS -l select=2:ncpus=125:mpiprocs=4:ompthreads=31:mem=120gb
+#PBS -l walltime=04:00:00
+#PBS -q workq
+#PBS -o logs/parascip_2node.out
+#PBS -e logs/parascip_2node.err
+
+cd $PBS_O_WORKDIR
+module load PrgEnv-gnu/8.6.0
+module load cray-mpich/8.1.32
+module load anaconda/3.13.5
+conda activate milp_env
+
+# Make the package importable even without `pip install -e .`
+export PYTHONPATH=$PWD/src:$PYTHONPATH
+
+CLUSTER_CFG=${CLUSTER_CFG:-configs/cluster_2node_default.yaml}
+PROBLEM_CFG=${PROBLEM_CFG:-configs/problem_target.yaml}
+
+# Render parascip.set from the cluster config -- no inline heredoc, so the
+# settings file and the mpiexec launch below can't drift out of sync.
+python pbs/gen_parascip_set.py --cluster-config "$CLUSTER_CFG" --out parascip.set
+
+RANKS_PER_NODE=$(python -m nr_slice_milp.cluster_config --field ranks_per_node --cluster-config "$CLUSTER_CFG")
+THREADS_PER_RANK=$(python -m nr_slice_milp.cluster_config --field threads_per_rank_resolved --cluster-config "$CLUSTER_CFG")
+TOTAL_RANKS=$(python -m nr_slice_milp.cluster_config --field total_ranks --cluster-config "$CLUSTER_CFG")
+
+# Generate MPS (with variable names assigned -- see export_mps.py fix)
+python -m nr_slice_milp.export_mps --config "$PROBLEM_CFG" --out 5gnr_slice.mps
+
+# This cluster is PBS Pro + Cray MPICH (HPE PALS) -- launch with mpiexec,
+# NOT srun (which is Slurm). rank 0 is the ParaSCIP Load Coordinator
+# (non-solving); the remaining (TOTAL_RANKS - 1) ranks run branch-and-bound.
+export OMP_NUM_THREADS=$THREADS_PER_RANK
+
+SECONDS=0
+mpiexec -n "$TOTAL_RANKS" --ppn "$RANKS_PER_NODE" --depth "$THREADS_PER_RANK" --cpu-bind depth \
+    $HOME/scip_install/bin/fscip \
+    5gnr_slice.mps \
+    -s parascip.set \
+    -fsol logs/solution.sol \
+    | tee logs/parascip_2node.log
+WALL=$SECONDS
+
+echo "ParaSCIP finished in ${WALL}s. Parsing solution..."
+python -m nr_slice_milp.parse_solution logs/solution.sol --config "$PROBLEM_CFG" \
+    --out logs/parsed_results.json --solve-time "$WALL"

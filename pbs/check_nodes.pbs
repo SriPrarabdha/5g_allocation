@@ -1,0 +1,57 @@
+#!/bin/bash
+#PBS -N 5gnr_check_nodes
+# Requests the SAME shape as the real 2-node ParaSCIP run, so this confirms
+# the allocation you'll actually use is visible and correctly sized.
+#PBS -l select=2:ncpus=125:mpiprocs=4:ompthreads=31:mem=120gb
+#PBS -l walltime=00:10:00
+#PBS -q workq
+#PBS -o logs/check_nodes.out
+#PBS -e logs/check_nodes.err
+
+# Submit with:  qsub pbs/check_nodes.pbs
+# Watch with:   qstat -u $USER   (or: bash scripts/qstat_monitor.sh <jobid>)
+# Read result:  logs/check_nodes.out
+#
+# Confirms PBS gave you 2 distinct nodes, each exposing its CPUs, and that
+# mpiexec distributes ranks across BOTH nodes (not 8 ranks piled on one).
+
+cd $PBS_O_WORKDIR
+module load PrgEnv-gnu/8.6.0
+module load cray-mpich/8.1.32
+
+echo "================ WHAT PBS ALLOCATED ================"
+qstat -f "$PBS_JOBID" 2>/dev/null | grep -E 'Resource_List|exec_host|exec_vnode' | sed 's/^[[:space:]]*//'
+
+echo
+echo "================ NODES IN THIS JOB (PBS_NODEFILE) ================"
+echo "PBS_NODEFILE = $PBS_NODEFILE"
+echo "Distinct nodes:"
+sort -u "$PBS_NODEFILE"
+NNODES=$(sort -u "$PBS_NODEFILE" | wc -l)
+echo "Distinct node count: $NNODES   (expected: 2)"
+
+echo
+echo "================ CPUs VISIBLE ON EACH NODE ================"
+# One rank per node prints its hostname + how many CPUs it can see.
+mpiexec -n 2 --ppn 1 bash -c 'echo "  $(hostname): nproc=$(nproc), /proc/cpuinfo cores=$(grep -c ^processor /proc/cpuinfo)"'
+
+echo
+echo "================ RANK DISTRIBUTION (8 ranks, 4 per node) ================"
+# Should print "      4 <nodeA>" and "      4 <nodeB>".
+mpiexec -n 8 --ppn 4 hostname | sort | uniq -c
+
+echo
+echo "================ CPU MODEL (mother superior node) ================"
+lscpu | grep -E '^CPU\(s\):|Model name|Thread|Core|Socket' || true
+
+echo
+echo "================ SUMMARY ================"
+if [ "$NNODES" -eq 2 ]; then
+    echo "  OK   2 nodes allocated and visible."
+else
+    echo "  FAIL expected 2 distinct nodes, got $NNODES."
+fi
+echo "  Compare the per-node nproc above against usable_cpus_per_node=125"
+echo "  in configs/cluster_2node_default.yaml. If the real number differs,"
+echo "  update that file (it is the single source of truth for the layout)."
+echo "================ DONE ================"

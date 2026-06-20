@@ -1,0 +1,26 @@
+n_b: 10
+n_r: 20
+rb_bandwidth_mhz: 0.18
+interference_radius: 0.15
+interference_seed: 42
+eff_seed: 42
+eff_low: 1.5
+eff_high: 6.0
+alpha_thresh: 0.6
+use_alpha_threshold: true
+slices:
+  - name: eMBB
+    t_min_mbps: 100.0
+    rb_min: 2
+    rb_max: 8
+    weight: 3.0
+  - name: URLLC
+    t_min_mbps: 10.0
+    rb_min: 1
+    rb_max: 4
+    weight: 5.0
+  - name: mMTC
+    t_min_mbps: 1.0
+    rb_min: 1
+    rb_max: 3
+    weight: 1.0
