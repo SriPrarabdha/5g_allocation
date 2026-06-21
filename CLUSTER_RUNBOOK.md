@@ -8,7 +8,7 @@ Scheduler facts for this cluster (don't mix these up with Slurm):
 - Submit a job: **`qsub`** · Monitor: **`qstat`** · Cancel: **`qdel`**
 - MPI launcher inside jobs: **`mpiexec`** (HPE PALS / Cray MPICH) — **not** `srun`
 - All commands below assume you are in the repo root and have done the one-time setup
-  in README §4 (conda env `milp_env`, `pip install -e .`, ParaSCIP compiled to
+  in README §4 (conda env `penv`, `pip install -e .`, ParaSCIP compiled to
   `$HOME/scip_install/bin/fscip`).
 
 Throughout, monitor any submitted job with:
@@ -120,7 +120,7 @@ and writing it to MPS (the format ParaSCIP reads). This also applies the variabl
 naming fix so the solution can be parsed later.
 
 ```bash
-conda activate milp_env
+conda activate penv
 export PYTHONPATH=$PWD/src:$PYTHONPATH
 
 # Target size (400 gNBs, 106 RBs). Takes a couple of minutes / a few GB RAM.
@@ -141,6 +141,26 @@ Optional 60-second validation with single-process SCIP before the big run:
 ```bash
 bash pbs/smoke_test.sh 5gnr_slice.mps
 ```
+
+---
+
+## Phase 4.5 — Build ParaSCIP (one-time, required for the 2-node run)
+
+conda gives you single-node SCIP only; the MPI-parallel `fscip` must be compiled.
+
+```bash
+bash scripts/build_parascip.sh          # on uan1; or JOBS=32 in an interactive job
+# the script prints the FSCIP_BIN line — add it to your shell:
+export FSCIP_BIN=$HOME/scip_install/bin/fscip
+$FSCIP_BIN --version
+
+# re-run the dependency check; fscip should now say OK:
+qsub pbs/check_dependencies.pbs && sleep 5 && cat logs/check_deps.out
+```
+
+If the build doesn't produce a binary, the script prints the UG-Makefile fallback —
+paste any error and iterate. The single-node baseline (5a) does **not** need this;
+only the 2-node ParaSCIP run (5b) does.
 
 ---
 
@@ -193,7 +213,7 @@ CLUSTER_CFG=configs/cluster_2node_default.yaml PROBLEM_CFG=configs/problem_mediu
 Once both `logs/results_1node.json` and `logs/parsed_results.json` exist:
 
 ```bash
-conda activate milp_env
+conda activate penv
 export PYTHONPATH=$PWD/src:$PYTHONPATH
 
 python -m nr_slice_milp.evaluate.cli \
@@ -222,7 +242,12 @@ above ~75% (speedup > 1.5× on 2 nodes).
 ## Quick reference — the whole sequence
 
 ```bash
-# --- one-time setup (README §4) done already ---
+# --- one-time setup ---
+conda create -n penv -c conda-forge python=3.11 git scip pyscipopt -y
+conda activate penv
+pip install -e .                                    # highspy + numpy + networkx + matplotlib + pyyaml
+bash scripts/build_parascip.sh                      # compile ParaSCIP (fscip) for the 2-node run
+export FSCIP_BIN=$HOME/scip_install/bin/fscip       # (the build script prints this)
 
 # Phase 0: login-node checks
 qstat -B; qstat -Q; pbsnodes -aSj | head

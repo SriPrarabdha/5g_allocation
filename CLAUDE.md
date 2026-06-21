@@ -16,16 +16,17 @@ Code is a real installable package under `src/nr_slice_milp/` (not embedded in R
 - `src/nr_slice_milp/parse_solution.py` — SCIP `.sol` parser
 - `src/nr_slice_milp/evaluate/` — `parascip_log.py`, `plots.py`, `speedup.py`, `cli.py`
 
-See README.md §3 for the full layout and §2.7 for known simplifications (alpha-threshold derivation, interference-graph naming).
+See README.md §3 for the full layout and §2.7 for known simplifications (alpha-threshold derivation, interference-graph naming). For the end-to-end cluster workflow (sanity checks → node/CPU visibility → build → solve → evaluate) see `CLUSTER_RUNBOOK.md`.
 
 ## Running the Code
 
-All Python commands require the conda environment to be activated first:
+All Python commands require the conda environment to be activated first (use your
+own conda — do NOT `module load anaconda`, it overrides the conda env):
 ```bash
-module load anaconda/3.13.5
-conda activate milp_env
-pip install -e .   # once, to install nr_slice_milp from pyproject.toml
+conda activate penv
+pip install -e .   # once, to install nr_slice_milp + deps (highspy, numpy, networkx, matplotlib, pyyaml)
 ```
+PBS scripts handle this via `pbs/env.sh` (env name `penv`, override with `CONDA_ENV=...`).
 
 **Build and solve (HiGHS, single node):**
 ```bash
@@ -92,8 +93,8 @@ Maximize `Σ w_s · x_{b,s}` (weighted admissions): eMBB=3, URLLC=5, mMTC=1. Pas
 
 - **Scheduler:** PBS Pro — jobs submitted with `qsub`, logs in `logs/`
 - **MPI:** Cray MPICH 8.1.32 launched via `mpiexec` (HPE PALS) inside PBS scripts — **not** `srun` (this is PBS Pro, not Slurm). Jobs submitted with `qsub`, monitored with `qstat` (`scripts/qstat_monitor.sh`)
-- **Modules needed:** `PrgEnv-gnu/8.6.0`, `cray-mpich/8.1.32`, `anaconda/3.13.5`
-- **ParaSCIP binary:** `$HOME/scip_install/bin/fscip` (compiled from SCIPOptSuite 9.1.0)
+- **Modules needed:** `PrgEnv-gnu/8.6.0`, `cray-mpich/8.1.32` (for `cc`/`CC` + MPI). Python comes from a user conda env (`penv`), NOT the `anaconda` module.
+- **ParaSCIP binary:** compiled via `scripts/build_parascip.sh` → `$HOME/scip_install/bin/fscip` (SCIPOptSuite 9.1.0 UG framework). Located at runtime via `$FSCIP_BIN` in `pbs/env.sh`. Not available from conda.
 - **Thread control:** `export HIGHS_THREADS=125` for single-node HiGHS (125 usable CPUs/node, not 128)
 
 ## Key Parameters

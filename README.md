@@ -5,6 +5,8 @@
 
 This document describes the **architecture and reasoning** behind the solver. The actual implementation lives in the `src/nr_slice_milp/` package (see §9) — this README is no longer the source of code, it's documentation of why the package is structured the way it is.
 
+> **Running it on the cluster?** Follow [`CLUSTER_RUNBOOK.md`](CLUSTER_RUNBOOK.md) — step-by-step commands to sanity-check the setup, confirm the 2 nodes and their CPUs are visible, then build, solve, and evaluate.
+
 ---
 
 ## 1. Problem Background
@@ -159,51 +161,82 @@ This is large enough to be genuinely hard for a single node, making 2-node ParaS
 
 ### 4.1 One-Time Setup (run from uan1)
 
+Create a conda env (named `penv` here — the PBS scripts default to this; override
+with `CONDA_ENV=...`). Note the Python package you need is **`highspy`** (the binding),
+not `highs` (the C++ lib/CLI):
+
 ```bash
-module load anaconda/3.13.5
-module load PrgEnv-gnu/8.6.0
-module load cray-mpich/8.1.32
+conda create -n penv -c conda-forge python=3.11 git scip pyscipopt -y
+conda activate penv
 
-conda create -n milp_env python=3.11 -y
-conda activate milp_env
-
-pip install -e .   # installs nr_slice_milp from pyproject.toml
+# Installs nr_slice_milp + its deps: highspy, numpy, networkx, matplotlib, pyyaml.
+pip install -e .
 
 python -c "import highspy; print('HiGHS OK:', highspy.__version__)"
+which scip   # SCIP CLI comes from conda; used for the MPS smoke test
 ```
 
-### 4.2 Compile ParaSCIP from Source
+`pip install -e .` is what pulls in `highspy` and the rest — installing the conda
+`highs` package alone is **not** enough (that's the C++ library, not the Python
+binding). The PBS scripts activate this env via `pbs/env.sh` (edit `CONDA_ENV`
+there if you named it differently) and locate `scip`/`fscip` via `$SCIP_BIN`/`$FSCIP_BIN`.
 
-ParaSCIP is the MPI-parallel version of SCIP. It must be compiled with Cray MPICH.
+### 4.2 Compile ParaSCIP from Source (required only for the 2-node run)
+
+**The conda `scip`/`pyscipopt` packages give you single-node SCIP only — they do
+NOT include the MPI-parallel ParaSCIP (`fscip`) binary.** Multi-node distributed
+branch-and-bound requires building the UG framework from source against Cray MPICH.
+
+**Easy path — use the build script** (downloads SCIPOptSuite, builds SoPlex+SCIP+UG
+with the Cray MPI compilers, auto-locates the parallel binary, installs it as
+`$HOME/scip_install/bin/fscip`):
 
 ```bash
+bash scripts/build_parascip.sh           # on uan1; or JOBS=32 inside an interactive job
+export FSCIP_BIN=$HOME/scip_install/bin/fscip   # the script prints this line
+$FSCIP_BIN --version
+```
+
+<details><summary>Manual build (what the script does)</summary>
+
+```bash
+module load PrgEnv-gnu/8.6.0 cray-mpich/8.1.32   # cc/CC wrap MPI -> UG gets MPI
+
 cd $HOME
 wget https://scipopt.org/download/release/scipoptsuite-9.1.0.tgz
 tar xzf scipoptsuite-9.1.0.tgz
-cd scipoptsuite-9.1.0
+cd scipoptsuite-9.1.0 && mkdir build && cd build
 
-mkdir build && cd build
 cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=cc \
   -DCMAKE_CXX_COMPILER=CC \
-  -DMPI=ON \
-  -DHIGHS=ON \
-  -DHIGHS_DIR=$(python -c "import highspy; import os; print(os.path.dirname(highspy.__file__))") \
-  -DPARASCIP=ON \
+  -DUG=ON \
+  -DZIMPL=OFF -DIPOPT=OFF -DPAPILO=OFF -DREADLINE=OFF \
   -DCMAKE_INSTALL_PREFIX=$HOME/scip_install
 
-make -j32
-make install
+make -j32 && make install
 
-$HOME/scip_install/bin/scip --version
-$HOME/scip_install/bin/fscip --version   # fscip = ParaSCIP binary
+# Locate whatever parallel binary UG produced (fscip or parascip):
+find . $HOME/scip_install -type f \( -name 'fscip*' -o -name 'parascip*' \)
 ```
+
+If `-DUG=ON` doesn't produce a parallel binary for your SCIPOptSuite version, fall
+back to the UG Makefile build (`cd ug && make COMM=mpi ...`) — `scripts/build_parascip.sh`
+prints the exact fallback commands. The Cray `CC` wrapper supplies MPI, so no separate
+`-DMPI=ON` is needed.
+
+</details>
+
+Then point the PBS scripts at it by exporting `FSCIP_BIN=$HOME/scip_install/bin/fscip`
+(or add `$HOME/scip_install/bin` to `PATH`); `pbs/env.sh` picks it up automatically.
+The parallel binary may be named `fscip` or `parascip` depending on build flags —
+`build_parascip.sh` installs whichever it finds as `fscip`.
 
 ### 4.3 Export Problem to MPS Format
 
 ```bash
-conda activate milp_env
+conda activate penv
 python -m nr_slice_milp.export_mps --config configs/problem_target.yaml --out 5gnr_slice.mps
 ```
 

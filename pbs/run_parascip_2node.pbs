@@ -10,13 +10,11 @@
 #PBS -e logs/parascip_2node.err
 
 cd $PBS_O_WORKDIR
-module load PrgEnv-gnu/8.6.0
-module load cray-mpich/8.1.32
-module load anaconda/3.13.5
-conda activate milp_env
+module load PrgEnv-gnu/8.6.0 2>/dev/null || true
+module load cray-mpich/8.1.32 2>/dev/null || true
 
-# Make the package importable even without `pip install -e .`
-export PYTHONPATH=$PWD/src:$PYTHONPATH
+# conda env (penv by default) + PYTHONPATH + SCIP_BIN/FSCIP_BIN
+source pbs/env.sh
 
 CLUSTER_CFG=${CLUSTER_CFG:-configs/cluster_2node_default.yaml}
 PROBLEM_CFG=${PROBLEM_CFG:-configs/problem_target.yaml}
@@ -39,7 +37,7 @@ export OMP_NUM_THREADS=$THREADS_PER_RANK
 
 SECONDS=0
 mpiexec -n "$TOTAL_RANKS" --ppn "$RANKS_PER_NODE" --depth "$THREADS_PER_RANK" --cpu-bind depth \
-    $HOME/scip_install/bin/fscip \
+    "$FSCIP_BIN" \
     5gnr_slice.mps \
     -s parascip.set \
     -fsol logs/solution.sol \

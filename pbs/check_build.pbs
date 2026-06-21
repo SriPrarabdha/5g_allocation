@@ -20,12 +20,11 @@
 # Any failing step prints FAIL and the script exits non-zero.
 
 cd $PBS_O_WORKDIR
-module load PrgEnv-gnu/8.6.0
-module load cray-mpich/8.1.32
-module load anaconda/3.13.5
-conda activate milp_env
+module load PrgEnv-gnu/8.6.0 2>/dev/null || true
+module load cray-mpich/8.1.32 2>/dev/null || true
 
-export PYTHONPATH=$PWD/src:$PYTHONPATH
+# conda env (penv by default) + PYTHONPATH + SCIP_BIN/FSCIP_BIN
+source pbs/env.sh
 set -e
 
 echo "================ 1. BYTE-COMPILE PACKAGE ================"
@@ -51,15 +50,19 @@ else
 fi
 
 echo "================ 5. SCIP VALIDATES MPS ================"
-$HOME/scip_install/bin/scip -f /tmp/toy.mps -c "set limits/time 60" -c "optimize" -c "quit" \
+"$SCIP_BIN" -f /tmp/toy.mps -c "set limits/time 60" -c "optimize" -c "quit" \
     && echo "  OK   scip optimized toy MPS"
 
 echo "================ 6. PARASCIP LAUNCHES (mpiexec) ================"
-python pbs/gen_parascip_set.py --cluster-config configs/cluster_2node_default.yaml --out /tmp/check.set
-# Short 30s run on 2 ranks just to confirm fscip starts under MPI on this node.
-mpiexec -n 2 --ppn 2 \
-    $HOME/scip_install/bin/fscip /tmp/toy.mps -s /tmp/check.set \
-    -fsol /tmp/toy.sol 2>&1 | tail -20
-echo "  OK   fscip launched under mpiexec"
+# fscip is only present if you compiled ParaSCIP/FiberSCIP -- skip cleanly if not.
+if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
+    python pbs/gen_parascip_set.py --cluster-config configs/cluster_2node_default.yaml --out /tmp/check.set
+    mpiexec -n 2 --ppn 2 \
+        "$FSCIP_BIN" /tmp/toy.mps -s /tmp/check.set \
+        -fsol /tmp/toy.sol 2>&1 | tail -20
+    echo "  OK   fscip launched under mpiexec"
+else
+    echo "  SKIP fscip not found ($FSCIP_BIN) -- compile ParaSCIP for the 2-node run (README S4.2)"
+fi
 
 echo "================ BUILD CHECK PASSED ================"

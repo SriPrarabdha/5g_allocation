@@ -4,5 +4,6 @@
 set -euo pipefail
 
 MPS_FILE=${1:-5gnr_slice.mps}
+SCIP_BIN="${SCIP_BIN:-$(command -v scip || echo "$HOME/scip_install/bin/scip")}"
 
-$HOME/scip_install/bin/scip -f "$MPS_FILE" -c "set limits/time 60" -c "optimize" -c "quit"
+"$SCIP_BIN" -f "$MPS_FILE" -c "set limits/time 60" -c "optimize" -c "quit"

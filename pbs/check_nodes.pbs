@@ -16,8 +16,11 @@
 # mpiexec distributes ranks across BOTH nodes (not 8 ranks piled on one).
 
 cd $PBS_O_WORKDIR
-module load PrgEnv-gnu/8.6.0
-module load cray-mpich/8.1.32
+module load PrgEnv-gnu/8.6.0 2>/dev/null || true
+module load cray-mpich/8.1.32 2>/dev/null || true
+# check_nodes only needs mpiexec + shell tools, but source env.sh anyway so
+# the run uses the same conda env as everything else.
+source pbs/env.sh 2>/dev/null || true
 
 echo "================ WHAT PBS ALLOCATED ================"
 qstat -f "$PBS_JOBID" 2>/dev/null | grep -E 'Resource_List|exec_host|exec_vnode' | sed 's/^[[:space:]]*//'

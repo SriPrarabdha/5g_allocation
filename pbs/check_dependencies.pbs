@@ -15,12 +15,11 @@
 # and the MPI launcher.
 
 cd $PBS_O_WORKDIR
-module load PrgEnv-gnu/8.6.0
-module load cray-mpich/8.1.32
-module load anaconda/3.13.5
-conda activate milp_env
+module load PrgEnv-gnu/8.6.0 2>/dev/null || true
+module load cray-mpich/8.1.32 2>/dev/null || true
 
-export PYTHONPATH=$PWD/src:$PYTHONPATH
+# conda env (penv by default) + PYTHONPATH + SCIP_BIN/FSCIP_BIN
+source pbs/env.sh
 
 echo "================ ENVIRONMENT ================"
 echo "Host: $(hostname)"
@@ -44,8 +43,13 @@ python -c "import nr_slice_milp; from nr_slice_milp.model import build_model; pr
     || echo "  FAIL nr_slice_milp import"
 
 echo "================ SOLVER BINARIES ================"
-( $HOME/scip_install/bin/scip  --version 2>&1 | head -1 && echo "  OK   scip" )   || echo "  FAIL scip not found at \$HOME/scip_install/bin/scip"
-( $HOME/scip_install/bin/fscip --version 2>&1 | head -1 && echo "  OK   fscip" )  || echo "  FAIL fscip not found at \$HOME/scip_install/bin/fscip"
+( "$SCIP_BIN"  --version 2>&1 | head -1 && echo "  OK   scip  ($SCIP_BIN)" )   || echo "  FAIL scip not found ($SCIP_BIN)"
+# fscip = ParaSCIP/FiberSCIP, NOT provided by conda -- must be compiled (README S4.2).
+( "$FSCIP_BIN" --version 2>&1 | head -1 && echo "  OK   fscip ($FSCIP_BIN)" )  || echo "  WARN fscip not found ($FSCIP_BIN) -- needed only for the multi-node ParaSCIP run"
+
+echo "================ PYSCIPOPT (conda) ================"
+python -c "import pyscipopt; print('  OK   pyscipopt', pyscipopt.__version__)" 2>/dev/null \
+    || echo "  INFO pyscipopt not importable (only needed if you use the SCIP Python path)"
 
 echo "================ MPI LAUNCHER ================"
 ( command -v mpiexec && mpiexec --version 2>&1 | head -1 && echo "  OK   mpiexec" ) || echo "  FAIL mpiexec not found"
