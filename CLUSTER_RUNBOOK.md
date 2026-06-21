@@ -7,9 +7,8 @@ solve it (1-node baseline + 2-node ParaSCIP) → evaluate.
 Scheduler facts for this cluster (don't mix these up with Slurm):
 - Submit a job: **`qsub`** · Monitor: **`qstat`** · Cancel: **`qdel`**
 - MPI launcher inside jobs: **`mpiexec`** (HPE PALS / Cray MPICH) — **not** `srun`
-- All commands below assume you are in the repo root and have done the one-time setup
-  in README §4 (conda env `penv`, `pip install -e .`, ParaSCIP compiled to
-  `$HOME/scip_install/bin/fscip`).
+- All commands below assume you are in the repo root (`cd ~/5g_allocation`) and have
+  done the one-time environment setup in **Phase S** below.
 
 Throughout, monitor any submitted job with:
 ```bash
@@ -18,6 +17,43 @@ bash scripts/qstat_monitor.sh        # auto-refreshing view of all your jobs
 bash scripts/qstat_monitor.sh <jobid>   # detailed view of one job
 ```
 Job output lands in `logs/<jobname>.out` (and `.err`). `qsub` prints the `<jobid>`.
+
+---
+
+## Phase S — One-time environment setup (do this first, on the login node)
+
+This is the conda-based setup that matches how this cluster is actually used (you use
+your **own conda**, not the system `anaconda` module). Run it once.
+
+```bash
+cd ~/5g_allocation
+
+# 1. Create the conda env. NOTE: install 'scip' + 'pyscipopt' from conda-forge for
+#    the single-node SCIP CLI; the Python HiGHS binding 'highspy' comes via pip in
+#    step 2 (the conda 'highs' package is the C++ lib, NOT the Python binding).
+conda create -n penv -c conda-forge python=3.11 git scip pyscipopt -y
+conda activate penv
+
+# 2. Install the package + all Python deps in one shot. This pulls in:
+#    highspy, numpy, networkx, matplotlib, pyyaml  (from pyproject.toml).
+pip install -e .
+
+# 3. Verify the Python side (no cluster job needed):
+python -c "import highspy; print('highspy OK', highspy.__version__)"
+python -c "import nr_slice_milp; from nr_slice_milp.model import build_model; print('package OK')"
+which scip            # SCIP CLI from conda (used for the MPS smoke test)
+```
+
+> If you already created `penv` with just `highs`/`pyscipopt` earlier: just
+> `conda activate penv && pip install -e .` — that adds `highspy` and the missing
+> `networkx`/`matplotlib`/`pyyaml`. The plain conda `highs` package is not enough.
+
+ParaSCIP (the MPI `fscip` binary for the 2-node run) is **not** on conda — you
+compile it in **Phase 4.5**. The single-node baseline works without it.
+
+If you named the env something other than `penv`, either pass `CONDA_ENV=<name>` to
+every `qsub` (`qsub -v CONDA_ENV=<name> ...`) or edit `CONDA_ENV` at the top of
+`pbs/env.sh` once.
 
 ---
 
@@ -57,10 +93,10 @@ qsub pbs/check_dependencies.pbs
 cat logs/check_deps.out
 ```
 
-**Pass criteria:** every line in `logs/check_deps.out` starts with `OK` — in
-particular `OK highspy`, `OK nr_slice_milp importable`, `OK scip`, `OK fscip`,
-`OK mpiexec`, and `OK ParascipLayout validates`. Any `FAIL` tells you exactly
-what's missing before you waste a big allocation.
+**Pass criteria:** `OK highspy`, `OK nr_slice_milp importable`, `OK scip`,
+`OK mpiexec`, and `OK ParascipLayout validates`. **`WARN fscip not found` is
+expected here** — you compile ParaSCIP in Phase 4.5; re-run this check afterward
+and it should flip to `OK fscip`. Any `FAIL` (not WARN) tells you what's missing.
 
 ---
 
@@ -83,6 +119,12 @@ cat logs/check_nodes.out
   against `usable_cpus_per_node: 125` in `configs/cluster_2node_default.yaml`.
 - The "RANK DISTRIBUTION" section shows `4 <nodeA>` and `4 <nodeB>` — i.e. the 8
   MPI ranks split 4-and-4 across the two nodes (not all 8 on one node).
+- "CONDA ENV / PACKAGE VISIBLE ON BOTH NODES" shows `highspy ... + nr_slice_milp
+  import OK` from **both** hostnames — proves your conda env + `pip install -e .`
+  are reachable cluster-wide (shared filesystem). An `IMPORT FAILED` here means the
+  env is on node-local storage or wasn't activated.
+- "FSCIP BINARY VISIBLE ON BOTH NODES" shows `fscip present` on both (or `fscip
+  MISSING` until you've done Phase 4.5 — expected before the ParaSCIP build).
 - Final line: `OK 2 nodes allocated and visible`.
 
 **If the per-node CPU count is not 125:** edit `usable_cpus_per_node` in
@@ -98,8 +140,9 @@ line in `pbs/run_parascip_2node.pbs` to match.
 
 End-to-end smoke test on the tiny toy problem: byte-compiles the package, runs the
 unit tests, builds+solves the toy MILP with HiGHS, exports an MPS and confirms the
-variable names are present, validates it with SCIP, and confirms `fscip` launches
-under `mpiexec`.
+variable names are present, validates it with SCIP, and (if ParaSCIP is built)
+confirms `fscip` launches under `mpiexec`. The fscip step **skips cleanly** until
+you've done Phase 4.5 — re-run this check after building ParaSCIP to exercise it.
 
 ```bash
 qsub pbs/check_build.pbs

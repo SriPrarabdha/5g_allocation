@@ -44,6 +44,22 @@ echo "================ RANK DISTRIBUTION (8 ranks, 4 per node) ================"
 mpiexec -n 8 --ppn 4 hostname | sort | uniq -c
 
 echo
+echo "================ CONDA ENV / PACKAGE VISIBLE ON BOTH NODES ================"
+# Proves the conda env + editable-installed package are reachable from BOTH
+# nodes (i.e. on a shared filesystem). PALS forwards node 0's environment --
+# PATH/PYTHONPATH from `source pbs/env.sh` above -- to the rank on each node,
+# so a successful `import` here means both nodes see the same python+package.
+# (Only node 0 actually runs Python in the real job; this is belt-and-suspenders.)
+mpiexec -n 2 --ppn 1 python -c "import socket, highspy, nr_slice_milp; print('  '+socket.gethostname()+': highspy '+highspy.__version__+' + nr_slice_milp import OK')" \
+    || echo "  IMPORT FAILED on at least one node -- is the conda env on a SHARED filesystem (\$HOME), and did 'source pbs/env.sh' activate it?"
+
+echo
+echo "================ FSCIP BINARY VISIBLE ON BOTH NODES ================"
+# The compiled fscip is the only thing that runs on both nodes in the real job;
+# confirm each node can see/exec it from the shared filesystem.
+mpiexec -n 2 --ppn 1 bash -c 'echo "  $(hostname): $([ -x "'"$FSCIP_BIN"'" ] && echo "fscip present" || echo "fscip MISSING ('"$FSCIP_BIN"')")"'
+
+echo
 echo "================ CPU MODEL (mother superior node) ================"
 lscpu | grep -E '^CPU\(s\):|Model name|Thread|Core|Socket' || true
 
