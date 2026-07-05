@@ -43,9 +43,21 @@ python -c "import nr_slice_milp; from nr_slice_milp.model import build_model; pr
     || echo "  FAIL nr_slice_milp import"
 
 echo "================ SOLVER BINARIES ================"
-( "$SCIP_BIN"  --version 2>&1 | head -1 && echo "  OK   scip  ($SCIP_BIN)" )   || echo "  FAIL scip not found ($SCIP_BIN)"
+# NB: test the binary with -x FIRST. Piping `--version` into `head` would mask
+# the binary's own exit status (head always succeeds), giving a false "OK".
+if [ -x "$SCIP_BIN" ]; then
+    "$SCIP_BIN" --version 2>&1 | head -1
+    echo "  OK   scip  ($SCIP_BIN)"
+else
+    echo "  FAIL scip not found ($SCIP_BIN)"
+fi
 # fscip = ParaSCIP/FiberSCIP, NOT provided by conda -- must be compiled (README S4.2).
-( "$FSCIP_BIN" --version 2>&1 | head -1 && echo "  OK   fscip ($FSCIP_BIN)" )  || echo "  WARN fscip not found ($FSCIP_BIN) -- needed only for the multi-node ParaSCIP run"
+if [ -x "$FSCIP_BIN" ]; then
+    "$FSCIP_BIN" --version 2>&1 | head -1
+    echo "  OK   fscip ($FSCIP_BIN)"
+else
+    echo "  WARN fscip not found ($FSCIP_BIN) -- expected until you build it (scripts/build_parascip.sh); needed only for the multi-node ParaSCIP run"
+fi
 
 echo "================ PYSCIPOPT (conda) ================"
 python -c "import pyscipopt; print('  OK   pyscipopt', pyscipopt.__version__)" 2>/dev/null \

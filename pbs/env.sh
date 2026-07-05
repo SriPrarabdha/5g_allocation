@@ -22,6 +22,14 @@ done
 conda activate "$CONDA_ENV" \
     || echo "WARN: could not 'conda activate $CONDA_ENV' -- is the env name right?"
 
+# Guard: catch a stale/inherited CONDA_ENV activating the wrong env silently.
+# (PBS can carry an exported CONDA_ENV from the submitting shell into the job,
+# overriding the 'penv' default above.)
+if [ -n "${CONDA_DEFAULT_ENV:-}" ] && [ "${CONDA_DEFAULT_ENV}" != "$CONDA_ENV" ]; then
+    echo "WARN: requested env '$CONDA_ENV' but active env is '$CONDA_DEFAULT_ENV'" \
+         "-- an inherited CONDA_ENV may be overriding the default; 'unset CONDA_ENV' to fix."
+fi
+
 # --- Make the package importable even without `pip install -e .` ---
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
