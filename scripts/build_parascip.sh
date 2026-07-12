@@ -39,12 +39,16 @@ fi
 echo "source: $SRC"
 
 echo "================ CMAKE CONFIGURE (SoPlex + SCIP + UG) ================"
+# Resolve the active conda prefix so CMake can find GMP and Boost that conda installed.
+CONDA_PREFIX="${CONDA_PREFIX:-$(conda info --base 2>/dev/null)/envs/penv}"
+echo "conda prefix: $CONDA_PREFIX"
 cd "$SRC"
 rm -rf build && mkdir build && cd build
 if ! cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=cc \
     -DCMAKE_CXX_COMPILER=CC \
+    -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
     -DUG=ON \
     -DZIMPL=OFF -DIPOPT=OFF -DPAPILO=OFF -DREADLINE=OFF \
     -DCMAKE_INSTALL_PREFIX="$PREFIX"; then
