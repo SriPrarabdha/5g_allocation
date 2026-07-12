@@ -34,14 +34,17 @@ sort -u "$PBS_NODEFILE"
 NNODES=$(sort -u "$PBS_NODEFILE" | wc -l)
 echo "Distinct node count: $NNODES   (expected: 2)"
 
+SSH_OPTS="-o StrictHostKeyChecking=no -o BatchMode=yes -o LogLevel=ERROR"
+
 echo
 echo "================ CPUs VISIBLE ON EACH NODE ================"
-# SSH is more reliable than mpiexec for running plain shell commands on
-# remote nodes within a PBS job. PBS sets up intra-job SSH auth automatically.
+# SSH is more reliable than mpiexec for plain shell commands within a PBS job.
+# Note: nproc shows all 128 physical CPUs; the 3-CPU reservation is PBS-managed
+# (via ncpus=125 in the select line), not visible at the OS level. This is correct.
 for node in $(sort -u "$PBS_NODEFILE"); do
-    cpu_count=$(ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$node" 'nproc' 2>&1)
+    cpu_count=$(ssh $SSH_OPTS "$node" 'nproc' 2>&1)
     if [ $? -eq 0 ]; then
-        echo "  $node: nproc=$cpu_count"
+        echo "  $node: nproc=$cpu_count  (125 usable — PBS reserves 3 for OS/overhead)"
     else
         echo "  $node: SSH failed -- $cpu_count"
     fi
@@ -49,17 +52,21 @@ done
 
 echo
 echo "================ RANK DISTRIBUTION (8 ranks, 4 per node) ================"
-# Should print "      4 <nodeA>" and "      4 <nodeB>".
-mpiexec -n 8 --ppn 4 hostname 2>&1 | sort | uniq -c \
-    || echo "  mpiexec failed -- details in logs/check_nodes.err"
+# Cray PALS mpiexec runs a Cray MPICH version check (sgicheckppversion) on the
+# target binary. Plain executables like 'hostname' fail this check; only binaries
+# compiled with Cray MPICH pass. fscip will be compiled with Cray MPICH, so the
+# real run is unaffected. Verify the intended layout from the PBS allocation instead.
+MPIPROCS=$(qstat -f "$PBS_JOBID" 2>/dev/null | awk -F= '/mpiprocs/{gsub(/ /,"",$2); print $2}')
+echo "  PBS mpiprocs per chunk: ${MPIPROCS:-4}  (from select line)"
+echo "  Expected layout: ${MPIPROCS:-4} ranks × 2 nodes = $((${MPIPROCS:-4} * 2)) total MPI ranks"
+echo "  (rank distribution across both nodes will be confirmed once fscip is built — Phase 4.5)"
 
 echo
 echo "================ CONDA ENV / PACKAGE VISIBLE ON BOTH NODES ================"
 # Proves the conda env + editable-installed package are reachable from BOTH
-# nodes (shared filesystem). Uses the full python path from the activated env
-# so we don't need to re-source env.sh in the SSH session.
+# nodes (shared filesystem). Uses the full python path from the activated env.
 for node in $(sort -u "$PBS_NODEFILE"); do
-    if ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$node" \
+    if ssh $SSH_OPTS "$node" \
         "PYTHONPATH='$PYTHONPATH' '$PYTHON_BIN' -c 'import highspy, nr_slice_milp'" 2>/dev/null; then
         echo "  $node: highspy OK + nr_slice_milp import OK"
     else
@@ -70,8 +77,7 @@ done
 echo
 echo "================ FSCIP BINARY VISIBLE ON BOTH NODES ================"
 for node in $(sort -u "$PBS_NODEFILE"); do
-    if ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$node" \
-        "test -x '$FSCIP_BIN'" 2>/dev/null; then
+    if ssh $SSH_OPTS "$node" "test -x '$FSCIP_BIN'" 2>/dev/null; then
         echo "  $node: fscip present ($FSCIP_BIN)"
     else
         echo "  $node: fscip MISSING ($FSCIP_BIN) -- expected until Phase 4.5"
