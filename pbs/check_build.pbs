@@ -79,23 +79,25 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
         echo "  WARN fscip standalone failed (rc=$RC) -- check binary / library path"
     fi
 
-    # MPI launch test. Cray PALS + Cray MPICH 8.1.32 may need --pmi=pmi2 to
-    # avoid MPI_Init hanging (mismatched PMI layer causes a deadlock at rank sync).
-    # timeout 90 ensures the check doesn't block the whole job if MPI init hangs.
+    # MPI launch test. Use || RC=$? so set -e doesn't abort the script on mpiexec
+    # failure -- we want to capture and report the exit code, not silently die.
+    # timeout 90 bounds the test; RC=124 means timeout (MPI_Init deadlock).
     echo "  -- fscip under mpiexec (-n 2, --pmi=pmi2):"
+    RC=0
     timeout 90 mpiexec -n 2 --ppn 2 --cpu-bind none --pmi=pmi2 \
         "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
-        -fsol /tmp/toy_mpi.sol > /tmp/fscip_mpi.txt 2>&1
-    RC=$?
-    tail -5 /tmp/fscip_mpi.txt
+        -fsol /tmp/toy_mpi.sol > /tmp/fscip_mpi.txt 2>&1 || RC=$?
+    echo "  mpiexec exit code: $RC"
+    cat /tmp/fscip_mpi.txt
     if grep -q "Gap" /tmp/fscip_mpi.txt 2>/dev/null; then
         echo "  OK   fscip launched under mpiexec (pmi2) and solved"
         echo "  NOTE add --pmi=pmi2 to mpiexec in run_parascip_2node.pbs"
-    elif [ $RC -eq 124 ]; then
-        echo "  WARN mpiexec timed out (MPI_Init hung) -- try --pmi=pmix next"
-        echo "       Phase 5a (HiGHS) unaffected; Phase 5b needs PMI fix before submitting."
+    elif [ "$RC" -eq 124 ]; then
+        echo "  WARN mpiexec timed out after 90s (MPI_Init still deadlocking with pmi2)"
+        echo "       Next step: try --pmi=pmix, or skip this check and run Phase 5b directly"
+        echo "       (single-node PALS behavior can differ from 2-node; real run may work)"
     else
-        echo "  WARN mpiexec returned $RC -- see output above and logs/check_build.err"
+        echo "  WARN mpiexec returned $RC -- see full output above"
     fi
 else
     echo "  SKIP fscip not found ($FSCIP_BIN) -- compile ParaSCIP for the 2-node run (README S4.2)"
