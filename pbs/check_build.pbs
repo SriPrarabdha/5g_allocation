@@ -61,22 +61,39 @@ echo "================ 6. PARASCIP LAUNCHES (mpiexec) ================"
 if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
     python pbs/gen_parascip_set.py --cluster-config configs/cluster_2node_default.yaml --out /tmp/check.set
 
+    # fscip requires: fscip <ug_param_file> <problem_file> [-s <scip_settings>]
+    # An empty UG param file tells fscip to use default framework settings.
+    printf '' > /tmp/fscip_ug.prm
+
     # Standalone sanity check first (no MPI).
     echo "  -- fscip standalone (no mpiexec):"
-    "$FSCIP_BIN" /tmp/toy.mps -s /tmp/check.set -fsol /tmp/toy.sol 2>&1 | head -5 \
-        && echo "  OK   fscip standalone" \
-        || echo "  WARN fscip standalone failed (check binary / library path)"
-
-    # MPI launch: --cpu-bind none lets Cray PALS launch non-Cray-native MPI binaries.
-    echo "  -- fscip under mpiexec (-n 2):"
-    if mpiexec -n 2 --ppn 2 --cpu-bind none \
-        "$FSCIP_BIN" /tmp/toy.mps -s /tmp/check.set \
-        -fsol /tmp/toy.sol 2>&1 | tail -5; then
-        echo "  OK   fscip launched under mpiexec"
+    "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
+        -fsol /tmp/toy.sol > /tmp/fscip_standalone.txt 2>&1
+    RC=$?
+    tail -5 /tmp/fscip_standalone.txt
+    if [ $RC -eq 0 ] && grep -q "Gap" /tmp/fscip_standalone.txt 2>/dev/null; then
+        echo "  OK   fscip standalone solved"
+    elif [ $RC -eq 0 ]; then
+        echo "  OK   fscip standalone exited 0 (check output above)"
     else
-        echo "  WARN mpiexec launch failed -- see logs/check_build.err for details"
-        echo "       The single-node HiGHS baseline (Phase 5a) still works."
-        echo "       For Phase 5b, try: mpiexec ... --cpu-bind none or check PMI config."
+        echo "  WARN fscip standalone failed (rc=$RC) -- check binary / library path"
+    fi
+
+    # MPI launch: --cpu-bind none avoids Cray PALS sgicheckppversion rejection.
+    # (The real 2-node run uses --cpu-bind depth for OMP pinning.)
+    echo "  -- fscip under mpiexec (-n 2):"
+    mpiexec -n 2 --ppn 2 --cpu-bind none \
+        "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
+        -fsol /tmp/toy.sol > /tmp/fscip_mpi.txt 2>&1
+    RC=$?
+    tail -5 /tmp/fscip_mpi.txt
+    if [ $RC -eq 0 ] && grep -q "Gap" /tmp/fscip_mpi.txt 2>/dev/null; then
+        echo "  OK   fscip launched under mpiexec and solved"
+    elif [ $RC -eq 0 ]; then
+        echo "  OK   fscip mpiexec exited 0 (check output above)"
+    else
+        echo "  WARN mpiexec returned $RC -- see logs/check_build.err"
+        echo "       Phase 5a (HiGHS 1-node) still works; Phase 5b may need PMI tuning."
     fi
 else
     echo "  SKIP fscip not found ($FSCIP_BIN) -- compile ParaSCIP for the 2-node run (README S4.2)"

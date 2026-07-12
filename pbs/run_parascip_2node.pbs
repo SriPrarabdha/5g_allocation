@@ -35,9 +35,14 @@ python -m nr_slice_milp.export_mps --config "$PROBLEM_CFG" --out 5gnr_slice.mps
 # (non-solving); the remaining (TOTAL_RANKS - 1) ranks run branch-and-bound.
 export OMP_NUM_THREADS=$THREADS_PER_RANK
 
+# fscip requires: fscip <ug_param_file> <problem_file> [-s <scip_settings>]
+# An empty UG param file tells fscip to use default framework settings.
+printf '' > fscip_ug.prm
+
 SECONDS=0
 mpiexec -n "$TOTAL_RANKS" --ppn "$RANKS_PER_NODE" --depth "$THREADS_PER_RANK" --cpu-bind depth \
     "$FSCIP_BIN" \
+    fscip_ug.prm \
     5gnr_slice.mps \
     -s parascip.set \
     -fsol logs/solution.sol \
