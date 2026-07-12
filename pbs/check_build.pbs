@@ -79,21 +79,23 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
         echo "  WARN fscip standalone failed (rc=$RC) -- check binary / library path"
     fi
 
-    # MPI launch: --cpu-bind none avoids Cray PALS sgicheckppversion rejection.
-    # (The real 2-node run uses --cpu-bind depth for OMP pinning.)
-    echo "  -- fscip under mpiexec (-n 2):"
-    mpiexec -n 2 --ppn 2 --cpu-bind none \
+    # MPI launch test. Cray PALS + Cray MPICH 8.1.32 may need --pmi=pmi2 to
+    # avoid MPI_Init hanging (mismatched PMI layer causes a deadlock at rank sync).
+    # timeout 90 ensures the check doesn't block the whole job if MPI init hangs.
+    echo "  -- fscip under mpiexec (-n 2, --pmi=pmi2):"
+    timeout 90 mpiexec -n 2 --ppn 2 --cpu-bind none --pmi=pmi2 \
         "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
-        -fsol /tmp/toy.sol > /tmp/fscip_mpi.txt 2>&1
+        -fsol /tmp/toy_mpi.sol > /tmp/fscip_mpi.txt 2>&1
     RC=$?
     tail -5 /tmp/fscip_mpi.txt
-    if [ $RC -eq 0 ] && grep -q "Gap" /tmp/fscip_mpi.txt 2>/dev/null; then
-        echo "  OK   fscip launched under mpiexec and solved"
-    elif [ $RC -eq 0 ]; then
-        echo "  OK   fscip mpiexec exited 0 (check output above)"
+    if grep -q "Gap" /tmp/fscip_mpi.txt 2>/dev/null; then
+        echo "  OK   fscip launched under mpiexec (pmi2) and solved"
+        echo "  NOTE add --pmi=pmi2 to mpiexec in run_parascip_2node.pbs"
+    elif [ $RC -eq 124 ]; then
+        echo "  WARN mpiexec timed out (MPI_Init hung) -- try --pmi=pmix next"
+        echo "       Phase 5a (HiGHS) unaffected; Phase 5b needs PMI fix before submitting."
     else
-        echo "  WARN mpiexec returned $RC -- see logs/check_build.err"
-        echo "       Phase 5a (HiGHS 1-node) still works; Phase 5b may need PMI tuning."
+        echo "  WARN mpiexec returned $RC -- see output above and logs/check_build.err"
     fi
 else
     echo "  SKIP fscip not found ($FSCIP_BIN) -- compile ParaSCIP for the 2-node run (README S4.2)"
