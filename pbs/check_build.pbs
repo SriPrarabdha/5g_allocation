@@ -50,8 +50,11 @@ else
 fi
 
 echo "================ 5. SCIP VALIDATES MPS ================"
-"$SCIP_BIN" -f /tmp/toy.mps -c "set limits/time 60" -c "optimize" -c "quit" \
-    && echo "  OK   scip optimized toy MPS"
+# SCIP 10 separates file mode (-f, auto-solves then quits) from batch mode
+# (-c/-b); they can't be mixed. -f alone reads, optimizes, and exits — no -c needed.
+"$SCIP_BIN" -f /tmp/toy.mps \
+    && echo "  OK   scip optimized toy MPS" \
+    || { echo "  FAIL scip could not solve toy MPS"; exit 1; }
 
 echo "================ 6. PARASCIP LAUNCHES (mpiexec) ================"
 # fscip is only present if you compiled ParaSCIP/FiberSCIP -- skip cleanly if not.

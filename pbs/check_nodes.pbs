@@ -56,9 +56,12 @@ echo "================ RANK DISTRIBUTION (8 ranks, 4 per node) ================"
 # target binary. Plain executables like 'hostname' fail this check; only binaries
 # compiled with Cray MPICH pass. fscip will be compiled with Cray MPICH, so the
 # real run is unaffected. Verify the intended layout from the PBS allocation instead.
-MPIPROCS=$(qstat -f "$PBS_JOBID" 2>/dev/null | awk -F= '/mpiprocs/{gsub(/ /,"",$2); print $2}')
-echo "  PBS mpiprocs per chunk: ${MPIPROCS:-4}  (from select line)"
-echo "  Expected layout: ${MPIPROCS:-4} ranks × 2 nodes = $((${MPIPROCS:-4} * 2)) total MPI ranks"
+MPIPROCS=$(qstat -f "$PBS_JOBID" 2>/dev/null \
+    | grep 'Resource_List.select' \
+    | grep -o 'mpiprocs=[0-9]*' | cut -d= -f2)
+MPIPROCS=${MPIPROCS:-4}
+echo "  PBS mpiprocs per chunk: $MPIPROCS  (from select line)"
+echo "  Expected layout: $MPIPROCS ranks × $NNODES nodes = $((MPIPROCS * NNODES)) total MPI ranks"
 echo "  (rank distribution across both nodes will be confirmed once fscip is built — Phase 4.5)"
 
 echo
