@@ -18,9 +18,10 @@
 cd $PBS_O_WORKDIR
 module load PrgEnv-gnu/8.6.0 2>/dev/null || true
 module load cray-mpich/8.1.32 2>/dev/null || true
-# check_nodes only needs mpiexec + shell tools, but source env.sh anyway so
-# the run uses the same conda env as everything else.
 source pbs/env.sh 2>/dev/null || true
+
+# Capture activated-env python path once for SSH use below.
+PYTHON_BIN="$(command -v python || echo none)"
 
 echo "================ WHAT PBS ALLOCATED ================"
 qstat -f "$PBS_JOBID" 2>/dev/null | grep -E 'Resource_List|exec_host|exec_vnode' | sed 's/^[[:space:]]*//'
@@ -35,29 +36,47 @@ echo "Distinct node count: $NNODES   (expected: 2)"
 
 echo
 echo "================ CPUs VISIBLE ON EACH NODE ================"
-# One rank per node prints its hostname + how many CPUs it can see.
-mpiexec -n 2 --ppn 1 bash -c 'echo "  $(hostname): nproc=$(nproc), /proc/cpuinfo cores=$(grep -c ^processor /proc/cpuinfo)"'
+# SSH is more reliable than mpiexec for running plain shell commands on
+# remote nodes within a PBS job. PBS sets up intra-job SSH auth automatically.
+for node in $(sort -u "$PBS_NODEFILE"); do
+    cpu_count=$(ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$node" 'nproc' 2>&1)
+    if [ $? -eq 0 ]; then
+        echo "  $node: nproc=$cpu_count"
+    else
+        echo "  $node: SSH failed -- $cpu_count"
+    fi
+done
 
 echo
 echo "================ RANK DISTRIBUTION (8 ranks, 4 per node) ================"
 # Should print "      4 <nodeA>" and "      4 <nodeB>".
-mpiexec -n 8 --ppn 4 hostname | sort | uniq -c
+mpiexec -n 8 --ppn 4 hostname 2>&1 | sort | uniq -c \
+    || echo "  mpiexec failed -- details in logs/check_nodes.err"
 
 echo
 echo "================ CONDA ENV / PACKAGE VISIBLE ON BOTH NODES ================"
 # Proves the conda env + editable-installed package are reachable from BOTH
-# nodes (i.e. on a shared filesystem). PALS forwards node 0's environment --
-# PATH/PYTHONPATH from `source pbs/env.sh` above -- to the rank on each node,
-# so a successful `import` here means both nodes see the same python+package.
-# (Only node 0 actually runs Python in the real job; this is belt-and-suspenders.)
-mpiexec -n 2 --ppn 1 python -c "import socket, highspy, nr_slice_milp; print('  '+socket.gethostname()+': highspy '+highspy.__version__+' + nr_slice_milp import OK')" \
-    || echo "  IMPORT FAILED on at least one node -- is the conda env on a SHARED filesystem (\$HOME), and did 'source pbs/env.sh' activate it?"
+# nodes (shared filesystem). Uses the full python path from the activated env
+# so we don't need to re-source env.sh in the SSH session.
+for node in $(sort -u "$PBS_NODEFILE"); do
+    if ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$node" \
+        "PYTHONPATH='$PYTHONPATH' '$PYTHON_BIN' -c 'import highspy, nr_slice_milp'" 2>/dev/null; then
+        echo "  $node: highspy OK + nr_slice_milp import OK"
+    else
+        echo "  $node: IMPORT FAILED -- is '$PYTHON_BIN' on a SHARED filesystem?"
+    fi
+done
 
 echo
 echo "================ FSCIP BINARY VISIBLE ON BOTH NODES ================"
-# The compiled fscip is the only thing that runs on both nodes in the real job;
-# confirm each node can see/exec it from the shared filesystem.
-mpiexec -n 2 --ppn 1 bash -c 'echo "  $(hostname): $([ -x "'"$FSCIP_BIN"'" ] && echo "fscip present" || echo "fscip MISSING ('"$FSCIP_BIN"')")"'
+for node in $(sort -u "$PBS_NODEFILE"); do
+    if ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$node" \
+        "test -x '$FSCIP_BIN'" 2>/dev/null; then
+        echo "  $node: fscip present ($FSCIP_BIN)"
+    else
+        echo "  $node: fscip MISSING ($FSCIP_BIN) -- expected until Phase 4.5"
+    fi
+done
 
 echo
 echo "================ CPU MODEL (mother superior node) ================"
