@@ -87,12 +87,13 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
     fi
 
     # -- mpiexec test (cray-pals recommended launcher) --
-    # parascip argv: parascip <N> <ug_param> <problem> [-s settings]
+    # parascip argv: parascip <ug_param> <problem> [-s settings]
+    # N is determined by mpiexec -n; do NOT pass it as a positional arg.
     # Use || RC=$? so set -e does not abort on non-zero exit.
     echo "  -- parascip under mpiexec (cray-pals, -n 2):"
     MPIEXEC_T0=$SECONDS; RC=0
     timeout 90 mpiexec -n 2 --ppn 2 --depth 1 --cpu-bind none \
-        "$FSCIP_BIN" 2 /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
+        "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
         -fsol /tmp/toy_mpi.sol > /tmp/fscip_mpi.txt 2>&1 || RC=$?
     MPIEXEC_WALL=$(( SECONDS - MPIEXEC_T0 ))
     echo "  mpiexec RC=$RC, elapsed=${MPIEXEC_WALL}s"
@@ -117,7 +118,7 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
         echo "  -- parascip under aprun (cray-pals, -n 2 -N 2):"
         APRUN_T0=$SECONDS; RC=0
         timeout 90 aprun -n 2 -N 2 -d 1 \
-            "$FSCIP_BIN" 2 /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
+            "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
             -fsol /tmp/toy_aprun.sol > /tmp/fscip_aprun.txt 2>&1 || RC=$?
         APRUN_WALL=$(( SECONDS - APRUN_T0 ))
         echo "  aprun RC=$RC, elapsed=${APRUN_WALL}s"
