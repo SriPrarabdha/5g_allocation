@@ -40,8 +40,10 @@ export OMP_NUM_THREADS=$THREADS_PER_RANK
 printf '' > fscip_ug.prm
 
 SECONDS=0
+# parascip argv: parascip <N_total_ranks> <ug_param_file> <problem_file> [-s settings]
 mpiexec -n "$TOTAL_RANKS" --ppn "$RANKS_PER_NODE" --depth "$THREADS_PER_RANK" --cpu-bind depth \
     "$FSCIP_BIN" \
+    "$TOTAL_RANKS" \
     fscip_ug.prm \
     5gnr_slice.mps \
     -s parascip.set \
