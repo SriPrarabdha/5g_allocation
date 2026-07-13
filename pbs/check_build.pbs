@@ -86,17 +86,20 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
     # timeout 90 bounds the test; RC=124 means timeout (MPI_Init deadlock).
     # parascip argv: parascip <N_total_ranks> <ug_param_file> <problem_file> [-s settings]
     # N = total MPI processes = #solvers + 1 (rank 0 is Load Coordinator, non-solving).
-    echo "  -- parascip under mpiexec (-n 2, --pmi=pmi2):"
+    # Try without --pmi first: the previous hang (before library fix) was caused by rank
+    # processes crashing on missing libscip.so. Now libraries load, default PMI may work.
+    echo "  -- parascip under mpiexec (-n 2, default PMI):"
     RC=0
-    timeout 90 mpiexec -n 2 --ppn 2 --cpu-bind none --pmi=pmi2 \
+    timeout 90 mpiexec -n 2 --ppn 2 --cpu-bind none \
         "$FSCIP_BIN" 2 /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
         -fsol /tmp/toy_mpi.sol > /tmp/fscip_mpi.txt 2>&1 || RC=$?
     echo "  mpiexec exit code: $RC"
     cat /tmp/fscip_mpi.txt
     if grep -q "Gap" /tmp/fscip_mpi.txt 2>/dev/null; then
-        echo "  OK   parascip launched under mpiexec (pmi2) and solved"
+        echo "  OK   parascip launched under mpiexec and solved"
     elif [ "$RC" -eq 124 ]; then
-        echo "  WARN mpiexec timed out after 90s"
+        echo "  WARN mpiexec timed out after 90s -- MPI_Init hanging, PMI issue"
+        echo "       Try submitting Phase 5b directly (2-node job, different PALS behaviour)"
     else
         echo "  WARN mpiexec returned $RC -- see full output above"
     fi
