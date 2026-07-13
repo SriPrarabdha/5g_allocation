@@ -65,6 +65,12 @@ if ! make -j"$JOBS"; then
 fi
 make install || true   # UG binaries aren't always installed; we locate them next
 
+# CMake's install step does not copy SCIP/SoPlex shared libs to the prefix.
+# Copy them manually so LD_LIBRARY_PATH=$PREFIX/lib resolves all dependencies.
+cp -v "$SRC/build/lib"/libscip*.so* "$PREFIX/lib/" 2>/dev/null || true
+cp -v "$SRC/build/lib"/libsoplex*.so* "$PREFIX/lib/" 2>/dev/null || true
+cp -v "$SRC/build/lib"/libgmp*.so* "$PREFIX/lib/" 2>/dev/null || true
+
 echo "================ LOCATE PARALLEL BINARY ================"
 # UG names the binary fscip (FiberSCIP) or parascip (ParaSCIP), sometimes with a
 # long arch/comm suffix -- find whatever was produced.
