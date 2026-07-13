@@ -68,8 +68,10 @@ make install || true   # UG binaries aren't always installed; we locate them nex
 echo "================ LOCATE PARALLEL BINARY ================"
 # UG names the binary fscip (FiberSCIP) or parascip (ParaSCIP), sometimes with a
 # long arch/comm suffix -- find whatever was produced.
+# Prefer parascip (MPI-parallel, UG+MPI) over fscip (shared-memory only, UG+pthreads).
+# Both may be built; only parascip distributes across nodes via mpiexec.
 mapfile -t FOUND < <(find "$SRC/build" "$SRC/ug" "$PREFIX" -type f \
-    \( -name 'fscip*' -o -name 'parascip*' \) -perm -u+x 2>/dev/null)
+    \( -name 'parascip*' -o -name 'fscip*' \) -perm -u+x 2>/dev/null)
 
 if [ "${#FOUND[@]}" -eq 0 ]; then
     cat <<EOF
@@ -89,15 +91,16 @@ fi
 
 mkdir -p "$PREFIX/bin"
 BIN="${FOUND[0]}"
-cp -v "$BIN" "$PREFIX/bin/fscip"
+cp -v "$BIN" "$PREFIX/bin/parascip"
 
 echo
 echo "================ SUCCESS ================"
 echo "Built parallel binary: $BIN"
-echo "Installed as:          $PREFIX/bin/fscip"
+echo "Installed as:          $PREFIX/bin/parascip"
 echo
 echo "Add this to your shell (pbs/env.sh will then pick it up automatically):"
-echo "    export FSCIP_BIN=$PREFIX/bin/fscip"
+echo "    export FSCIP_BIN=$PREFIX/bin/parascip"
 echo
-echo "Quick check:"
-echo "    \$PREFIX/bin/fscip --version   ||   $PREFIX/bin/fscip --help | head"
+echo "Quick check (verify MPI symbols present):"
+echo "    nm $PREFIX/bin/parascip 2>/dev/null | grep -c MPI_Init"
+echo "    ldd $PREFIX/bin/parascip | grep -i mpi"

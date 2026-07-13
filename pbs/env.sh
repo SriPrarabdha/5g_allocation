@@ -37,7 +37,9 @@ export PYTHONPATH="$PWD/src:$PYTHONPATH"
 # SCIP usually comes from conda (on PATH). fscip/ParaSCIP must be compiled
 # (README S4.2) -- once built, point FSCIP_BIN at it (or just have it on PATH).
 export SCIP_BIN="${SCIP_BIN:-$(command -v scip || echo "$HOME/scip_install/bin/scip")}"
-export FSCIP_BIN="${FSCIP_BIN:-$(command -v fscip || echo "$HOME/scip_install/bin/fscip")}"
+# parascip is the MPI-distributed binary (UG+MPI); fscip is shared-memory only (UG+pthreads).
+# For multi-node runs, parascip is required. Fall back to fscip if parascip not found.
+export FSCIP_BIN="${FSCIP_BIN:-$(command -v parascip || echo "$HOME/scip_install/bin/parascip")}"
 
 echo "[env.sh] conda env=${CONDA_DEFAULT_ENV:-none} python=$(command -v python || echo none)"
 echo "[env.sh] SCIP_BIN=$SCIP_BIN"
