@@ -33,6 +33,12 @@ fi
 # --- Make the package importable even without `pip install -e .` ---
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
+# --- SCIP/SoPlex shared libraries ---
+# Cray compute nodes may ignore RPATH embedded in the binary; set LD_LIBRARY_PATH
+# explicitly so libscip.so.9.1 and libsoplex.so are found by the dynamic linker.
+# This also allows PALS to dlopen the binary cleanly (needed for the sgicheckppversion check).
+export LD_LIBRARY_PATH="${HOME}/scip_install/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
 # --- Solver binaries ---
 # SCIP usually comes from conda (on PATH). fscip/ParaSCIP must be compiled
 # (README S4.2) -- once built, point FSCIP_BIN at it (or just have it on PATH).
