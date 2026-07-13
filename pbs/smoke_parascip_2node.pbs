@@ -1,0 +1,54 @@
+#!/bin/bash
+#PBS -N 5gnr_smoke_2node
+#PBS -l select=2:ncpus=125:mpiprocs=4:ompthreads=31:mem=120gb
+#PBS -l walltime=00:30:00
+#PBS -q workq
+#PBS -o logs/smoke_parascip_2node.out
+#PBS -e logs/smoke_parascip_2node.err
+
+# Quick 2-node smoke test using the toy problem (not the full target).
+# Purpose: verify mpiexec + parascip works under real 2-node PALS before
+# committing 4 hours of allocation to the full run.
+
+cd $PBS_O_WORKDIR
+module load PrgEnv-gnu/8.6.0 2>/dev/null || true
+module load cray-mpich/8.1.32 2>/dev/null || true
+source pbs/env.sh
+
+CLUSTER_CFG=${CLUSTER_CFG:-configs/cluster_2node_default.yaml}
+
+python pbs/gen_parascip_set.py --cluster-config "$CLUSTER_CFG" --out /tmp/smoke.set
+
+RANKS_PER_NODE=$(python -m nr_slice_milp.cluster_config --field ranks_per_node --cluster-config "$CLUSTER_CFG")
+THREADS_PER_RANK=$(python -m nr_slice_milp.cluster_config --field threads_per_rank_resolved --cluster-config "$CLUSTER_CFG")
+TOTAL_RANKS=$(python -m nr_slice_milp.cluster_config --field total_ranks --cluster-config "$CLUSTER_CFG")
+
+python -m nr_slice_milp.export_mps --config configs/problem_toy.yaml --out /tmp/smoke.mps
+
+printf '' > /tmp/smoke_ug.prm
+export OMP_NUM_THREADS=$THREADS_PER_RANK
+
+echo "Launching parascip: $TOTAL_RANKS ranks ($RANKS_PER_NODE/node), $THREADS_PER_RANK threads/rank"
+echo "Problem: toy (configs/problem_toy.yaml)"
+echo "mpiexec: $(which mpiexec)"
+
+SECONDS=0
+mpiexec -n "$TOTAL_RANKS" --ppn "$RANKS_PER_NODE" --depth "$THREADS_PER_RANK" --cpu-bind depth \
+    "$FSCIP_BIN" \
+    "$TOTAL_RANKS" \
+    /tmp/smoke_ug.prm \
+    /tmp/smoke.mps \
+    -s /tmp/smoke.set \
+    -fsol /tmp/smoke.sol \
+    | tee logs/smoke_parascip_2node.log
+RC=$?
+WALL=$SECONDS
+
+echo "mpiexec exit code: $RC"
+echo "Elapsed: ${WALL}s"
+if [ $RC -eq 0 ]; then
+    echo "SMOKE TEST PASSED -- parascip ran under 2-node mpiexec"
+    echo "Safe to submit pbs/run_parascip_2node.pbs for the full 400-gNB problem."
+else
+    echo "SMOKE TEST FAILED (RC=$RC) -- check logs/smoke_parascip_2node.out and .err"
+fi
