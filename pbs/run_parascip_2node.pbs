@@ -12,6 +12,9 @@
 cd $PBS_O_WORKDIR
 module load PrgEnv-gnu/8.6.0 2>/dev/null || true
 module load cray-mpich/8.1.32 2>/dev/null || true
+# cray-pals provides the HPE-recommended mpiexec/aprun (not the cray-mpich one).
+module use /opt/cray/pals/modulefiles/ 2>/dev/null || true
+module load cray-pals 2>/dev/null || true
 
 # conda env (penv by default) + PYTHONPATH + SCIP_BIN/FSCIP_BIN
 source pbs/env.sh

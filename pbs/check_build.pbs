@@ -22,6 +22,11 @@
 cd $PBS_O_WORKDIR
 module load PrgEnv-gnu/8.6.0 2>/dev/null || true
 module load cray-mpich/8.1.32 2>/dev/null || true
+# cray-pals provides the PALS-native mpiexec/aprun (HPE recommended over cray-mpich's mpiexec).
+# The PALS modulefiles path must be added first (from LG-M04 perftools lab script).
+# Load AFTER cray-mpich so cray-pals mpiexec shadows the cray-mpich one in PATH.
+module use /opt/cray/pals/modulefiles/ 2>/dev/null || true
+module load cray-pals 2>/dev/null || true
 
 # conda env (penv by default) + PYTHONPATH + SCIP_BIN/FSCIP_BIN
 source pbs/env.sh
@@ -56,19 +61,19 @@ echo "================ 5. SCIP VALIDATES MPS ================"
     && echo "  OK   scip optimized toy MPS" \
     || { echo "  FAIL scip could not solve toy MPS"; exit 1; }
 
-echo "================ 6. PARASCIP LAUNCHES (mpiexec) ================"
+echo "================ 6. PARASCIP LAUNCHES (mpiexec / aprun) ================"
 # fscip is only present if you compiled ParaSCIP/FiberSCIP -- skip cleanly if not.
 if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
     python pbs/gen_parascip_set.py --cluster-config configs/cluster_2node_default.yaml --out /tmp/check.set
-
-    # fscip requires: fscip <ug_param_file> <problem_file> [-s <scip_settings>]
-    # An empty UG param file tells fscip to use default framework settings.
     printf '' > /tmp/fscip_ug.prm
 
-    # parascip (UG+MPI) requires mpiexec with >=2 ranks to do anything useful.
-    # Rank 0 is the Load Coordinator and hangs waiting for solver ranks if run alone.
-    # timeout 30 catches this hang; a timeout here is EXPECTED and not an error.
-    echo "  -- binary sanity (invoke with 1 process, expect timeout or quick exit):"
+    # Confirm which launchers are in PATH -- must be cray-pals versions, not cray-mpich.
+    echo "  mpiexec: $(which mpiexec 2>/dev/null || echo MISSING)"
+    mpiexec --version 2>&1 | head -2 | sed 's/^/    /'
+    echo "  aprun:   $(which aprun 2>/dev/null || echo NOT AVAILABLE)"
+
+    # Binary sanity: parascip needs >=2 MPI ranks; standalone hangs or exits immediately.
+    echo "  -- binary sanity (1 process, expect timeout or quick exit):"
     RC=0
     timeout 30 "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
         -fsol /tmp/toy.sol > /tmp/fscip_standalone.txt 2>&1 || RC=$?
@@ -77,31 +82,56 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
     elif grep -q "Gap" /tmp/fscip_standalone.txt 2>/dev/null; then
         echo "  OK   binary solved standalone (fscip pthreads mode)"
     else
-        echo "  INFO binary exited $RC without solving (normal for parascip without mpiexec)"
+        echo "  INFO binary exited $RC (normal for parascip without mpiexec)"
         tail -3 /tmp/fscip_standalone.txt
     fi
 
-    # MPI launch test. Use || RC=$? so set -e doesn't abort the script on mpiexec
-    # failure -- we want to capture and report the exit code, not silently die.
-    # timeout 90 bounds the test; RC=124 means timeout (MPI_Init deadlock).
-    # parascip argv: parascip <N_total_ranks> <ug_param_file> <problem_file> [-s settings]
-    # N = total MPI processes = #solvers + 1 (rank 0 is Load Coordinator, non-solving).
-    # Try without --pmi first: the previous hang (before library fix) was caused by rank
-    # processes crashing on missing libscip.so. Now libraries load, default PMI may work.
-    echo "  -- parascip under mpiexec (-n 2, default PMI):"
-    RC=0
-    timeout 90 mpiexec -n 2 --ppn 2 --cpu-bind none \
+    # -- mpiexec test (cray-pals recommended launcher) --
+    # parascip argv: parascip <N> <ug_param> <problem> [-s settings]
+    # Use || RC=$? so set -e does not abort on non-zero exit.
+    echo "  -- parascip under mpiexec (cray-pals, -n 2):"
+    MPIEXEC_T0=$SECONDS; RC=0
+    timeout 90 mpiexec -n 2 --ppn 2 --depth 1 --cpu-bind none \
         "$FSCIP_BIN" 2 /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
         -fsol /tmp/toy_mpi.sol > /tmp/fscip_mpi.txt 2>&1 || RC=$?
-    echo "  mpiexec exit code: $RC"
+    MPIEXEC_WALL=$(( SECONDS - MPIEXEC_T0 ))
+    echo "  mpiexec RC=$RC, elapsed=${MPIEXEC_WALL}s"
     cat /tmp/fscip_mpi.txt
-    if grep -q "Gap" /tmp/fscip_mpi.txt 2>/dev/null; then
-        echo "  OK   parascip launched under mpiexec and solved"
+    if grep -q "Gap\|feasible\|Solving" /tmp/fscip_mpi.txt 2>/dev/null; then
+        echo "  OK   parascip launched under mpiexec and produced solver output"
+        MPIEXEC_OK=1
     elif [ "$RC" -eq 124 ]; then
-        echo "  WARN mpiexec timed out after 90s -- MPI_Init hanging, PMI issue"
-        echo "       Try submitting Phase 5b directly (2-node job, different PALS behaviour)"
+        echo "  WARN mpiexec timed out (MPI_Init deadlock -- PMI issue)"
+        MPIEXEC_OK=0
+    elif [ "$MPIEXEC_WALL" -lt 5 ] && [ "$RC" -eq 0 ]; then
+        echo "  WARN mpiexec RC=0 in <5s with no output (silent failure)"
+        echo "       cray-pals module may not have loaded -- check 'module list' in the .err log"
+        MPIEXEC_OK=0
     else
-        echo "  WARN mpiexec returned $RC -- see full output above"
+        echo "  WARN mpiexec RC=$RC (see output above)"
+        MPIEXEC_OK=0
+    fi
+
+    # -- aprun test (Cray XC-style PALS launcher, alternative to mpiexec) --
+    if command -v aprun >/dev/null 2>&1; then
+        echo "  -- parascip under aprun (cray-pals, -n 2 -N 2):"
+        APRUN_T0=$SECONDS; RC=0
+        timeout 90 aprun -n 2 -N 2 -d 1 \
+            "$FSCIP_BIN" 2 /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
+            -fsol /tmp/toy_aprun.sol > /tmp/fscip_aprun.txt 2>&1 || RC=$?
+        APRUN_WALL=$(( SECONDS - APRUN_T0 ))
+        echo "  aprun RC=$RC, elapsed=${APRUN_WALL}s"
+        cat /tmp/fscip_aprun.txt
+        if grep -q "Gap\|feasible\|Solving" /tmp/fscip_aprun.txt 2>/dev/null; then
+            echo "  OK   parascip launched under aprun and produced solver output"
+            [ "$MPIEXEC_OK" -eq 0 ] && echo "  NOTE: mpiexec failed -- use LAUNCHER=aprun in smoke + production scripts"
+        elif [ "$APRUN_WALL" -lt 5 ] && [ "$RC" -eq 0 ]; then
+            echo "  WARN aprun RC=0 in <5s with no output (silent failure)"
+        else
+            echo "  WARN aprun RC=$RC (see output above)"
+        fi
+    else
+        echo "  INFO aprun not in PATH (cray-pals not loaded, or not installed)"
     fi
 else
     echo "  SKIP fscip not found ($FSCIP_BIN) -- compile ParaSCIP for the 2-node run (README S4.2)"
