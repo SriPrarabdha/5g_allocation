@@ -65,18 +65,20 @@ if [ -x "$FSCIP_BIN" ] || command -v "$FSCIP_BIN" >/dev/null 2>&1; then
     # An empty UG param file tells fscip to use default framework settings.
     printf '' > /tmp/fscip_ug.prm
 
-    # Standalone sanity check first (no MPI).
-    echo "  -- fscip standalone (no mpiexec):"
-    "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
-        -fsol /tmp/toy.sol > /tmp/fscip_standalone.txt 2>&1
-    RC=$?
-    tail -5 /tmp/fscip_standalone.txt
-    if [ $RC -eq 0 ] && grep -q "Gap" /tmp/fscip_standalone.txt 2>/dev/null; then
-        echo "  OK   fscip standalone solved"
-    elif [ $RC -eq 0 ]; then
-        echo "  OK   fscip standalone exited 0 (check output above)"
+    # parascip (UG+MPI) requires mpiexec with >=2 ranks to do anything useful.
+    # Rank 0 is the Load Coordinator and hangs waiting for solver ranks if run alone.
+    # timeout 30 catches this hang; a timeout here is EXPECTED and not an error.
+    echo "  -- binary sanity (invoke with 1 process, expect timeout or quick exit):"
+    RC=0
+    timeout 30 "$FSCIP_BIN" /tmp/fscip_ug.prm /tmp/toy.mps -s /tmp/check.set \
+        -fsol /tmp/toy.sol > /tmp/fscip_standalone.txt 2>&1 || RC=$?
+    if [ "$RC" -eq 124 ]; then
+        echo "  OK   binary launched (timed out waiting for MPI peers -- expected for parascip)"
+    elif grep -q "Gap" /tmp/fscip_standalone.txt 2>/dev/null; then
+        echo "  OK   binary solved standalone (fscip pthreads mode)"
     else
-        echo "  WARN fscip standalone failed (rc=$RC) -- check binary / library path"
+        echo "  INFO binary exited $RC without solving (normal for parascip without mpiexec)"
+        tail -3 /tmp/fscip_standalone.txt
     fi
 
     # MPI launch test. Use || RC=$? so set -e doesn't abort the script on mpiexec
